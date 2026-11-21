@@ -11,6 +11,7 @@
  * `errorCode` copy so it owns no cross-module runtime surface.
  */
 import { execFile, spawn, type ChildProcess, type StdioOptions } from "node:child_process";
+import { existsSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -374,6 +375,14 @@ async function listPosixProcessSnapshots(options: ProcessSnapshotOptions = {}): 
   return parsePsOutput(stdout);
 }
 
+/** @internal Resolve the PowerShell binary path on Windows, falling back to System32 if not in PATH. */
+function resolvePowershellBinary(): string {
+  if (process.platform !== "win32") return "powershell.exe";
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
+  const system32Powershell = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+  return existsSync(system32Powershell) ? system32Powershell : "powershell.exe";
+}
+
 /** @internal Enumerate process snapshots on Windows via `Get-CimInstance Win32_Process` JSON. */
 async function listWindowsProcessSnapshots(options: ProcessSnapshotOptions = {}): Promise<ProcessSnapshot[]> {
   const command = [
@@ -381,7 +390,7 @@ async function listWindowsProcessSnapshots(options: ProcessSnapshotOptions = {})
     "Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CommandLine, @{Name='StartedAtMs';Expression={([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress",
   ].join("; ");
   const stdout = await new Promise<string>((resolveList, rejectList) => {
-    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...snapshotBudget(options) }, (error, out) => {
+    execFile(resolvePowershellBinary(), ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...snapshotBudget(options) }, (error, out) => {
       if (error) rejectList(error);
       else resolveList(out);
     });
@@ -403,7 +412,7 @@ export async function captureProcessSnapshotsByPids(pids: readonly number[]): Pr
     `Get-CimInstance Win32_Process -Filter \"${filter}\" | Select-Object ProcessId, ParentProcessId, CommandLine, @{Name='StartedAtMs';Expression={([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress`,
   ].join("; ");
   const stdout = await new Promise<string>((resolveList, rejectList) => {
-    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", maxBuffer: 1024 * 1024 }, (error, out) => {
+    execFile(resolvePowershellBinary(), ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", maxBuffer: 1024 * 1024 }, (error, out) => {
       if (error) rejectList(error);
       else resolveList(out);
     });
@@ -577,7 +586,7 @@ async function captureWindowsStampedProcessTrees<
     "$all | Select-Object ProcessId, ParentProcessId, CommandLine, @{Name='StartedAtMs';Expression={([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress",
   ].join("; ");
   const stdout = await new Promise<string>((resolveList, rejectList) => {
-    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 }, (error, out) => {
+    execFile(resolvePowershellBinary(), ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 }, (error, out) => {
       if (error) rejectList(error);
       else resolveList(out);
     });
